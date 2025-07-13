@@ -35,400 +35,256 @@ local Window = Rayfield:CreateWindow({
       GrabKeyFromSite = false, -- If this is true, set Key below to the RAW site you would like Rayfield to get the key from
       Key = {"Hello"} -- List of keys that will be accepted by the system, can be RAW file links (pastebin, github etc) or simple strings ("hello","key22")
    }
-})
-
---[[
-  ESP Tab completo para Rayfield UI
-  Features:
-  - Player ESP (R6/R15) com Highlight, Boxes, Name, Healthbar
-  - Items ESP com Highlight
-  - Sound ESP (indica origem de passos/sons)
-  - LOS ESP (linha de visão entre players)
-  - Inventory section (com toggles para itens, armas, etc)
-  Tudo configurável via toggles, sliders e dropdowns
---]]
+   })
 
 -- Serviços
 local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
-local Workspace = game:GetService("Workspace")
 local LocalPlayer = Players.LocalPlayer
 
--- Variáveis globais e configurações padrões
-local ESPConfig = {
-    PlayerESP = {
-        Enabled = true,
-        ShowBoxes = true,
-        ShowNames = true,
-        ShowHealth = true,
-        Color = Color3.fromRGB(0, 150, 255),
-        Transparency = 0.5,
-    },
-    ItemsESP = {
-        Enabled = true,
-        Color = Color3.fromRGB(255, 255, 0),
-        Transparency = 0.7,
-    },
-    SoundESP = {
-        Enabled = false,
-        Radius = 20,
-    },
-    LOSESP = {
-        Enabled = false,
-        Color = Color3.new(1, 0, 0),
-    },
-    Inventory = {
-        ShowWeapons = true,
-        ShowTools = true,
-        ShowConsumables = true,
-    }
-}
+-- Estados Globais ESP
+local ESPEnabled = false
+local ESPPlayersEnabled = true
+local ESPItemsEnabled = false
+local ESPSoundsEnabled = false
+local ESPVisionEnabled = false
+
+local ESPColor = Color3.fromRGB(0, 150, 255)
+local ESPTransparency = 0.5
+local ESPLineThickness = 1
 
 local ActiveHighlights = {}
-local ActiveBoxes = {}
+local ActiveItemHighlights = {}
+local ActiveSoundIndicators = {}
 
--- Função para limpar ESP existentes
-local function ClearESP()
-    for _, hl in pairs(ActiveHighlights) do
-        if hl and hl.Parent then
-            hl:Destroy()
-        end
-    end
-    ActiveHighlights = {}
-
-    for _, box in pairs(ActiveBoxes) do
-        if box and box.Parent then
-            box:Destroy()
-        end
-    end
-    ActiveBoxes = {}
+-- Função pra limpar highlights gerais
+local function ClearHighlights()
+	for _, h in pairs(ActiveHighlights) do
+		if h and h.Parent then h:Destroy() end
+	end
+	ActiveHighlights = {}
 end
 
--- Cria Highlight para personagem ou item
-local function CreateHighlight(target, color, transparency)
-    local highlight = Instance.new("Highlight")
-    highlight.Adornee = target
-    highlight.FillColor = color or Color3.new(1, 1, 1)
-    highlight.OutlineColor = Color3.new(1, 1, 1)
-    highlight.FillTransparency = transparency or 0.5
-    highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-    highlight.Parent = workspace
-    table.insert(ActiveHighlights, highlight)
-    return highlight
+local function ClearItemHighlights()
+	for _, h in pairs(ActiveItemHighlights) do
+		if h and h.Parent then h:Destroy() end
+	end
+	ActiveItemHighlights = {}
 end
 
--- Cria Box gui para um personagem
-local function CreateBox(player, color)
-    local box = Drawing.new("Square")
-    box.Color = color or Color3.new(1, 1, 1)
-    box.Thickness = 2
-    box.Transparency = 1
-    box.Filled = false
-    box.Visible = false
-    table.insert(ActiveBoxes, box)
-    return box
+local function ClearSoundIndicators()
+	for _, s in pairs(ActiveSoundIndicators) do
+		if s and s.Parent then s:Destroy() end
+	end
+	ActiveSoundIndicators = {}
 end
 
--- Checa se o personagem é R6 ou R15 e retorna HumanoidRootPart
-local function GetRootPart(character)
-    if character:FindFirstChild("HumanoidRootPart") then
-        return character.HumanoidRootPart
-    elseif character:FindFirstChild("Torso") then
-        return character.Torso
-    elseif character:FindFirstChild("UpperTorso") then
-        return character.UpperTorso
-    end
-    return nil
+-- Cria highlight para personagem
+local function CreatePlayerHighlight(character)
+	if not character or not character:IsA("Model") then return end
+	local highlight = Instance.new("Highlight")
+	highlight.Name = "ESPHighlight"
+	highlight.Adornee = character
+	highlight.FillColor = ESPColor
+	highlight.OutlineColor = Color3.new(1, 1, 1)
+	highlight.FillTransparency = ESPTransparency
+	highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+	highlight.Parent = character
+	table.insert(ActiveHighlights, highlight)
 end
 
--- Pega a posição da tela para um Vector3 world point
-local function WorldToScreenPoint(position)
-    local camera = workspace.CurrentCamera
-    local point, onScreen = camera:WorldToViewportPoint(position)
-    return Vector2.new(point.X, point.Y), onScreen
+-- ESP para itens (exemplo: partes com tag "Item")
+local function CreateItemHighlight(item)
+	if not item or not item:IsA("BasePart") then return end
+	local highlight = Instance.new("Highlight")
+	highlight.Name = "ItemHighlight"
+	highlight.Adornee = item
+	highlight.FillColor = Color3.fromRGB(255, 200, 0) -- amarelo por padrão
+	highlight.OutlineColor = Color3.new(1, 1, 1)
+	highlight.FillTransparency = 0.6
+	highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+	highlight.Parent = item
+	table.insert(ActiveItemHighlights, highlight)
 end
 
--- Atualiza ESP dos jogadores
-local function UpdatePlayerESP()
-    ClearESP()
-    if not ESPConfig.PlayerESP.Enabled then return end
+-- Placeholder simples para sons (por ex. cria uma esfera no local do som)
+local function CreateSoundIndicator(position)
+	local part = Instance.new("Part")
+	part.Shape = Enum.PartType.Ball
+	part.Material = Enum.Material.Neon
+	part.Color = Color3.fromRGB(255, 0, 0)
+	part.Size = Vector3.new(1,1,1)
+	part.Anchored = true
+	part.CanCollide = false
+	part.Transparency = 0.5
+	part.Position = position
+	part.Name = "SoundIndicator"
+	part.Parent = workspace
+	table.insert(ActiveSoundIndicators, part)
 
-    for _, player in pairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("Humanoid") and player.Character.Humanoid.Health > 0 then
-            local root = GetRootPart(player.Character)
-            if root then
-                -- Highlight
-                CreateHighlight(player.Character, ESPConfig.PlayerESP.Color, ESPConfig.PlayerESP.Transparency)
-
-                -- Box via Drawing API
-                if ESPConfig.PlayerESP.ShowBoxes then
-                    local box = CreateBox(player, ESPConfig.PlayerESP.Color)
-                    local topLeftPos, visible = WorldToScreenPoint(root.Position + Vector3.new(-1, 3, 0))
-                    local bottomRightPos, _ = WorldToScreenPoint(root.Position + Vector3.new(1, 0, 0))
-
-                    if visible then
-                        local size = Vector2.new(bottomRightPos.X - topLeftPos.X, bottomRightPos.Y - topLeftPos.Y)
-                        box.Position = Vector2.new(topLeftPos.X, topLeftPos.Y)
-                        box.Size = size
-                        box.Visible = true
-                    else
-                        box.Visible = false
-                    end
-                end
-
-                -- Name
-                if ESPConfig.PlayerESP.ShowNames then
-                    -- Aqui você pode adicionar Drawing.Text para nomear players (implementação extra)
-                    -- Exemplo simplificado omitido para clareza
-                end
-
-                -- Healthbar (simplificada)
-                if ESPConfig.PlayerESP.ShowHealth then
-                    -- Implementar barra de vida via Drawing ou SurfaceGui (implementação extra)
-                    -- Exemplo omitido para foco no núcleo ESP
-                end
-            end
-        end
-    end
+	-- Auto-remove após 3 segundos (exemplo)
+	delay(3, function()
+		if part and part.Parent then part:Destroy() end
+	end)
 end
 
--- Atualiza ESP de itens (exemplo simples para objetos com tag "Item")
-local function UpdateItemsESP()
-    if not ESPConfig.ItemsESP.Enabled then return end
-    for _, item in pairs(workspace:GetChildren()) do
-        if item:IsA("BasePart") and item:FindFirstChild("IsItem") then -- exemplo de tag
-            CreateHighlight(item, ESPConfig.ItemsESP.Color, ESPConfig.ItemsESP.Transparency)
-        end
-    end
+-- Atualiza ESP
+local function UpdateESP()
+	ClearHighlights()
+	if not ESPEnabled or not ESPPlayersEnabled then return end
+	for _, player in pairs(Players:GetPlayers()) do
+		if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+			CreatePlayerHighlight(player.Character)
+		end
+	end
 end
 
--- Atualiza Sound ESP (indica origem de sons, tipo passos)
+-- Atualiza ESP de itens (exemplo simplificado)
+local function UpdateItemESP()
+	ClearItemHighlights()
+	if not ESPEnabled or not ESPItemsEnabled then return end
+
+	-- Exemplo: destacar todos os itens com Tag "Item"
+	local CollectionService = game:GetService("CollectionService")
+	local items = CollectionService:GetTagged("Item")
+	for _, item in pairs(items) do
+		CreateItemHighlight(item)
+	end
+end
+
+-- Atualiza ESP de sons (placeholder)
 local function UpdateSoundESP()
-    if not ESPConfig.SoundESP.Enabled then return end
-    -- Exemplo básico: escutar sons e criar indicadores na tela (implementação complexa omitida)
+	ClearSoundIndicators()
+	if not ESPEnabled or not ESPSoundsEnabled then return end
+
+	-- Exemplo: supomos que você tem uma lista de sons (deixe aqui o seu sistema de detecção)
+	-- Aqui só um exemplo com um som aleatório
+	-- CreateSoundIndicator(Vector3.new(0, 5, 0))
 end
 
--- Atualiza Line of Sight ESP (quem está olhando para quem)
-local function UpdateLOSESP()
-    if not ESPConfig.LOSESP.Enabled then return end
-    -- Implementação complexa, geralmente com raycasting para verificar visão direta
+-- Atualiza ESP visão (linha de visão)
+local function UpdateVisionESP()
+	-- Aqui você pode implementar linhas de visão entre players
+	-- Por simplicidade, deixei vazio (mas podemos expandir)
 end
 
--- Atualiza Inventory (exemplo simples, pode ser expandido)
-local function UpdateInventory()
-    if not ESPConfig.Inventory.ShowWeapons then
-        -- Ocultar armas no ESP, se aplicável
-    end
-    -- Outras lógicas de inventory ESP podem ser adicionadas aqui
-end
-
--- Loop principal que atualiza todos os ESPs
+-- Loop principal ESP
 RunService.RenderStepped:Connect(function()
-    UpdatePlayerESP()
-    UpdateItemsESP()
-    UpdateSoundESP()
-    UpdateLOSESP()
-    UpdateInventory()
+	pcall(function()
+		if ESPEnabled then
+			UpdateESP()
+			UpdateItemESP()
+			UpdateSoundESP()
+			UpdateVisionESP()
+		else
+			ClearHighlights()
+			ClearItemHighlights()
+			ClearSoundIndicators()
+		end
+	end)
 end)
 
--- Interface Rayfield
-
+-- UI Rayfield - ESP Tab
 local ESPTab = Window:CreateTab("ESP", 6023426915)
 
--- Player ESP Section
+-- Section Player ESP
 local playerSection = ESPTab:CreateSection("Player ESP")
 
-ESPTab:CreateToggle({
-    Name = "Enable Player ESP",
-    CurrentValue = ESPConfig.PlayerESP.Enabled,
-    Flag = "TogglePlayerESP",
-    Callback = function(value)
-        ESPConfig.PlayerESP.Enabled = value
-    end
+playerSection:CreateToggle({
+	Name = "Enable Player ESP",
+	CurrentValue = true,
+	Flag = "PlayerESPEnabled",
+	Callback = function(value)
+		ESPPlayersEnabled = value
+	end
 })
 
-ESPTab:CreateToggle({
-    Name = "Show Boxes",
-    CurrentValue = ESPConfig.PlayerESP.ShowBoxes,
-    Flag = "TogglePlayerBoxes",
-    Callback = function(value)
-        ESPConfig.PlayerESP.ShowBoxes = value
-    end
+playerSection:CreateDropdown({
+	Name = "ESP Color",
+	Options = {"Blue", "Red", "Green", "Yellow"},
+	CurrentOption = "Blue",
+	Flag = "ESPColor",
+	Callback = function(option)
+		if option == "Blue" then
+			ESPColor = Color3.fromRGB(0, 150, 255)
+		elseif option == "Red" then
+			ESPColor = Color3.fromRGB(255, 0, 0)
+		elseif option == "Green" then
+			ESPColor = Color3.fromRGB(0, 255, 0)
+		elseif option == "Yellow" then
+			ESPColor = Color3.fromRGB(255, 255, 0)
+		end
+	end
 })
 
-ESPTab:CreateToggle({
-    Name = "Show Names",
-    CurrentValue = ESPConfig.PlayerESP.ShowNames,
-    Flag = "TogglePlayerNames",
-    Callback = function(value)
-        ESPConfig.PlayerESP.ShowNames = value
-    end
+playerSection:CreateSlider({
+	Name = "ESP Transparency",
+	Range = {0, 1},
+	Increment = 0.05,
+	CurrentValue = 0.5,
+	Flag = "ESPTransparency",
+	Callback = function(value)
+		ESPTransparency = value
+	end
 })
 
-ESPTab:CreateToggle({
-    Name = "Show Healthbar",
-    CurrentValue = ESPConfig.PlayerESP.ShowHealth,
-    Flag = "TogglePlayerHealth",
-    Callback = function(value)
-        ESPConfig.PlayerESP.ShowHealth = value
-    end
+-- Section Item ESP
+local itemSection = ESPTab:CreateSection("Item ESP")
+
+itemSection:CreateToggle({
+	Name = "Enable Item ESP",
+	CurrentValue = false,
+	Flag = "ItemESPEnabled",
+	Callback = function(value)
+		ESPItemsEnabled = value
+	end
 })
 
-ESPTab:CreateDropdown({
-    Name = "ESP Color",
-    Options = {"Blue", "Red", "Green", "Yellow"},
-    CurrentOption = "Blue",
-    Flag = "PlayerESPColor",
-    Callback = function(option)
-        if option == "Blue" then
-            ESPConfig.PlayerESP.Color = Color3.fromRGB(0, 150, 255)
-        elseif option == "Red" then
-            ESPConfig.PlayerESP.Color = Color3.fromRGB(255, 0, 0)
-        elseif option == "Green" then
-            ESPConfig.PlayerESP.Color = Color3.fromRGB(0, 255, 0)
-        elseif option == "Yellow" then
-            ESPConfig.PlayerESP.Color = Color3.fromRGB(255, 255, 0)
-        end
-    end
-})
-
-ESPTab:CreateSlider({
-    Name = "Transparency",
-    Range = {0, 1},
-    Increment = 0.05,
-    CurrentValue = ESPConfig.PlayerESP.Transparency,
-    Flag = "PlayerESPTransparency",
-    Callback = function(value)
-        ESPConfig.PlayerESP.Transparency = value
-    end
-})
-
--- Items ESP Section
-local itemsSection = ESPTab:CreateSection("Items ESP")
-
-ESPTab:CreateToggle({
-    Name = "Enable Items ESP",
-    CurrentValue = ESPConfig.ItemsESP.Enabled,
-    Flag = "ToggleItemsESP",
-    Callback = function(value)
-        ESPConfig.ItemsESP.Enabled = value
-    end
-})
-
-ESPTab:CreateDropdown({
-    Name = "Items ESP Color",
-    Options = {"Yellow", "White", "Purple", "Orange"},
-    CurrentOption = "Yellow",
-    Flag = "ItemsESPColor",
-    Callback = function(option)
-        if option == "Yellow" then
-            ESPConfig.ItemsESP.Color = Color3.fromRGB(255, 255, 0)
-        elseif option == "White" then
-            ESPConfig.ItemsESP.Color = Color3.fromRGB(255, 255, 255)
-        elseif option == "Purple" then
-            ESPConfig.ItemsESP.Color = Color3.fromRGB(160, 32, 240)
-        elseif option == "Orange" then
-            ESPConfig.ItemsESP.Color = Color3.fromRGB(255, 165, 0)
-        end
-    end
-})
-
-ESPTab:CreateSlider({
-    Name = "Items Transparency",
-    Range = {0, 1},
-    Increment = 0.05,
-    CurrentValue = ESPConfig.ItemsESP.Transparency,
-    Flag = "ItemsESPTransparency",
-    Callback = function(value)
-        ESPConfig.ItemsESP.Transparency = value
-    end
-})
-
--- Sound ESP Section
+-- Section Sound ESP
 local soundSection = ESPTab:CreateSection("Sound ESP")
 
+soundSection:CreateToggle({
+	Name = "Enable Sound ESP",
+	CurrentValue = false,
+	Flag = "SoundESPEnabled",
+	Callback = function(value)
+		ESPSoundsEnabled = value
+	end
+})
+
+-- Section Vision ESP
+local visionSection = ESPTab:CreateSection("Vision ESP")
+
+visionSection:CreateToggle({
+	Name = "Enable Vision ESP",
+	CurrentValue = false,
+	Flag = "VisionESPEnabled",
+	Callback = function(value)
+		ESPVisionEnabled = value
+	end
+})
+
+-- Toggle global ESP ON/OFF
 ESPTab:CreateToggle({
-    Name = "Enable Sound ESP",
-    CurrentValue = ESPConfig.SoundESP.Enabled,
-    Flag = "ToggleSoundESP",
-    Callback = function(value)
-        ESPConfig.SoundESP.Enabled = value
-    end
+	Name = "Enable All ESP",
+	CurrentValue = true,
+	Flag = "GlobalESPEnabled",
+	Callback = function(value)
+		ESPEnabled = value
+		if not value then
+			ClearHighlights()
+			ClearItemHighlights()
+			ClearSoundIndicators()
+		end
+	end
 })
 
-ESPTab:CreateSlider({
-    Name = "Sound Radius",
-    Range = {5, 50},
-    Increment = 1,
-    CurrentValue = ESPConfig.SoundESP.Radius,
-    Flag = "SoundESPRadius",
-    Callback = function(value)
-        ESPConfig.SoundESP.Radius = value
-    end
-})
-
--- LOS ESP Section
-local losSection = ESPTab:CreateSection("Line of Sight ESP")
-
-ESPTab:CreateToggle({
-    Name = "Enable LOS ESP",
-    CurrentValue = ESPConfig.LOSESP.Enabled,
-    Flag = "ToggleLOSESP",
-    Callback = function(value)
-        ESPConfig.LOSESP.Enabled = value
-    end
-})
-
-ESPTab:CreateDropdown({
-    Name = "LOS ESP Color",
-    Options = {"Red", "Blue", "Green"},
-    CurrentOption = "Red",
-    Flag = "LOSESPColor",
-    Callback = function(option)
-        if option == "Red" then
-            ESPConfig.LOSESP.Color = Color3.new(1, 0, 0)
-        elseif option == "Blue" then
-            ESPConfig.LOSESP.Color = Color3.new(0, 0, 1)
-        elseif option == "Green" then
-            ESPConfig.LOSESP.Color = Color3.new(0, 1, 0)
-        end
-    end
-})
-
--- Inventory Section
-local inventorySection = ESPTab:CreateSection("Inventory ESP")
-
-ESPTab:CreateToggle({
-    Name = "Show Weapons",
-    CurrentValue = ESPConfig.Inventory.ShowWeapons,
-    Flag = "InventoryWeapons",
-    Callback = function(value)
-        ESPConfig.Inventory.ShowWeapons = value
-    end
-})
-
-ESPTab:CreateToggle({
-    Name = "Show Tools",
-    CurrentValue = ESPConfig.Inventory.ShowTools,
-    Flag = "InventoryTools",
-    Callback = function(value)
-        ESPConfig.Inventory.ShowTools = value
-    end
-})
-
-ESPTab:CreateToggle({
-    Name = "Show Consumables",
-    CurrentValue = ESPConfig.Inventory.ShowConsumables,
-    Flag = "InventoryConsumables",
-    Callback = function(value)
-        ESPConfig.Inventory.ShowConsumables = value
-    end
-})
-
--- Botão para limpar todos os ESPs
+-- Botão para limpar tudo
 ESPTab:CreateButton({
-    Name = "Clear All ESP",
-    Callback = function()
-        ClearESP()
-    end
+	Name = "Clear All ESP",
+	Callback = function()
+		ClearHighlights()
+		ClearItemHighlights()
+		ClearSoundIndicators()
+	end
 })
