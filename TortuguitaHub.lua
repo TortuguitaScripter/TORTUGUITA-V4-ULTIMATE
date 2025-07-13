@@ -37,273 +37,526 @@ local Window = Rayfield:CreateWindow({
    }
 })
 
--- ESP TAB
-
+-- Assume que 'Window' já existe (criado antes)
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local LocalPlayer = Players.LocalPlayer
 local Camera = workspace.CurrentCamera
 
-local ESPTab = Window:CreateTab("ESP", 6023426915)
-
--- Sections
-local PlayerESPSection = ESPTab:CreateSection("Player ESP")
-local ItemESPSection = ESPTab:CreateSection("Item ESP")
-local SoundESPSection = ESPTab:CreateSection("Sound ESP")
-local VisionESPSection = ESPTab:CreateSection("Vision ESP")
-
--- ESP State
+-- Estados
 local ESPEnabled = false
-local PlayerESPSettings = {
-    Boxes = true,
-    Names = true,
-    Health = true,
-    Distance = false,
-    Tracers = false,
-    Skeleton = false,
-    Chams = false,
-    Color = Color3.fromRGB(0, 150, 255),
-    Transparency = 0.5,
-    MaxDistance = 1000,
-}
+local HighlightEnabled = false
+local BoxEnabled = false
+local TracerEnabled = false
+local DistanceEnabled = false
+local HealthBarEnabled = false
+local NameEnabled = false
+local InventoryEnabled = false
 
-local ItemESPSettings = {
-    Enabled = false,
-    Filter = {},
-    Color = Color3.fromRGB(0, 255, 0),
-    Transparency = 0.6,
-}
+local HighlightColor = Color3.fromRGB(0, 150, 255)
+local HighlightTransparency = 0.5
 
-local SoundESPSettings = {
-    Enabled = false,
-    ShowFootsteps = true,
-    Color = Color3.fromRGB(255, 100, 0),
-}
+local BoxColor = Color3.fromRGB(0, 150, 255)
+local TracerColor = Color3.fromRGB(0, 150, 255)
+local DistanceColor = Color3.new(1,1,1)
+local HealthBarColor = Color3.fromRGB(0, 255, 0)
+local NameColor = Color3.new(1,1,1)
+local InventoryColor = Color3.new(1,1,1)
 
-local VisionESPSettings = {
-    Enabled = false,
-    ShowLines = true,
-    LineColor = Color3.fromRGB(255, 0, 0),
-}
+-- Tabelas para armazenar instâncias ESP
+local Highlights = {}
+local Boxes = {}
+local Tracers = {}
+local Distances = {}
+local HealthBars = {}
+local Names = {}
+local Inventories = {}
 
--- Containers for ESP Objects
-local PlayerESPObjects = {}
-local ItemESPObjects = {}
-local SoundESPObjects = {}
-local VisionESPObjects = {}
-
--- Helper: Create Drawing objects safely (avoid detection)
-local function CreateDrawing(type)
-    local success, drawing = pcall(function() return Drawing.new(type) end)
-    if success then return drawing end
-    return nil
+-- Função auxiliar para criar BillboardGui
+local function CreateBillboard(parent, name, size, offset)
+    local gui = Instance.new("BillboardGui")
+    gui.Name = name or "ESPGui"
+    gui.Adornee = parent
+    gui.AlwaysOnTop = true
+    gui.Size = size or UDim2.new(0, 100, 0, 40)
+    gui.StudsOffset = offset or Vector3.new(0, 3, 0)
+    gui.ResetOnSpawn = false
+    gui.Parent = game:GetService("CoreGui")
+    return gui
 end
 
--- Function to create box for player
-local function CreatePlayerBox(player)
-    local box = CreateDrawing("Square")
-    if not box then return nil end
-    box.Color = PlayerESPSettings.Color
-    box.Transparency = 1 - PlayerESPSettings.Transparency
-    box.Thickness = 2
-    box.Filled = false
-    box.Visible = false
-    return box
+-- Criar caixa (Frame) para Box ESP
+local function CreateBoxGui(parent)
+    local boxGui = CreateBillboard(parent, "BoxESP", UDim2.new(0, 120, 0, 60), Vector3.new(0, 3, 0))
+    local frame = Instance.new("Frame", boxGui)
+    frame.Name = "BoxFrame"
+    frame.Size = UDim2.new(1, 0, 1, 0)
+    frame.BackgroundColor3 = BoxColor
+    frame.BackgroundTransparency = 0.7
+    frame.BorderColor3 = BoxColor
+    frame.BorderSizePixel = 2
+    frame.Parent = boxGui
+    return boxGui
 end
 
--- Function to create tracer line for player
-local function CreateTracer(player)
-    local line = CreateDrawing("Line")
-    if not line then return nil end
-    line.Color = PlayerESPSettings.Color
-    line.Transparency = 1 - PlayerESPSettings.Transparency
-    line.Thickness = 1.5
+-- Criar texto label para Nome, Distância, Inventory e HealthBar
+local function CreateTextLabel(parentGui, text, color, textSize)
+    local label = Instance.new("TextLabel", parentGui)
+    label.BackgroundTransparency = 1
+    label.Size = UDim2.new(1, 0, 1, 0)
+    label.TextColor3 = color
+    label.TextStrokeColor3 = Color3.new(0,0,0)
+    label.TextStrokeTransparency = 0.5
+    label.Font = Enum.Font.SourceSansBold
+    label.TextSize = textSize or 16
+    label.Text = text or ""
+    label.TextWrapped = true
+    label.TextYAlignment = Enum.TextYAlignment.Center
+    label.TextXAlignment = Enum.TextXAlignment.Center
+    return label
+end
+
+-- Criar HealthBar GUI
+local function CreateHealthBarGui(parent)
+    local gui = CreateBillboard(parent, "HealthBarESP", UDim2.new(0, 80, 0, 10), Vector3.new(0, 2, 0))
+    local bg = Instance.new("Frame", gui)
+    bg.Name = "Background"
+    bg.Size = UDim2.new(1, 0, 1, 0)
+    bg.BackgroundColor3 = Color3.new(0, 0, 0)
+    bg.BackgroundTransparency = 0.7
+    bg.BorderSizePixel = 0
+
+    local bar = Instance.new("Frame", bg)
+    bar.Name = "Bar"
+    bar.Size = UDim2.new(1, 0, 1, 0)
+    bar.BackgroundColor3 = HealthBarColor
+    bar.BorderSizePixel = 0
+
+    return gui, bar
+end
+
+-- Criar Tracer (linha da base da tela até jogador)
+local function CreateTracer()
+    local line = Instance.new("Frame")
+    line.Name = "TracerLine"
+    line.AnchorPoint = Vector2.new(0.5, 1)
+    line.Size = UDim2.new(0, 2, 0, 0)
+    line.BackgroundColor3 = TracerColor
+    line.BorderSizePixel = 0
     line.Visible = false
+    line.Parent = game:GetService("CoreGui")
     return line
 end
 
--- Function to create name label
-local function CreateNameLabel(player)
-    local text = CreateDrawing("Text")
-    if not text then return nil end
-    text.Text = player.Name
-    text.Color = PlayerESPSettings.Color
-    text.Size = 14
-    text.Visible = false
-    text.Center = true
-    text.Outline = true
-    return text
+-- Limpar ESP para um jogador
+local function ClearPlayerESP(player)
+    if Highlights[player] then Highlights[player]:Destroy() Highlights[player] = nil end
+    if Boxes[player] then Boxes[player]:Destroy() Boxes[player] = nil end
+    if Tracers[player] then Tracers[player]:Destroy() Tracers[player] = nil end
+    if Distances[player] then Distances[player]:Destroy() Distances[player] = nil end
+    if HealthBars[player] then HealthBars[player].Gui:Destroy() HealthBars[player] = nil end
+    if Names[player] then Names[player]:Destroy() Names[player] = nil end
+    if Inventories[player] then Inventories[player]:Destroy() Inventories[player] = nil end
 end
 
--- Clear ESP drawings for players
-local function ClearPlayerESP()
-    for _, objs in pairs(PlayerESPObjects) do
-        if objs.Box then objs.Box:Remove() end
-        if objs.Tracer then objs.Tracer:Remove() end
-        if objs.NameLabel then objs.NameLabel:Remove() end
-    end
-    PlayerESPObjects = {}
-end
-
--- Update player ESP each frame
-local function UpdatePlayerESP()
-    if not ESPEnabled or not PlayerESPSettings.Boxes then
-        ClearPlayerESP()
-        return
-    end
-
+-- Limpar tudo
+local function ClearAllESP()
     for _, player in pairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-            local root = player.Character.HumanoidRootPart
-            local screenPos, onScreen = Camera:WorldToViewportPoint(root.Position)
-            if onScreen and (root.Position - Camera.CFrame.Position).Magnitude <= PlayerESPSettings.MaxDistance then
-                local box = PlayerESPObjects[player] and PlayerESPObjects[player].Box or CreatePlayerBox(player)
-                local tracer = PlayerESPObjects[player] and PlayerESPObjects[player].Tracer or CreateTracer(player)
-                local nameLabel = PlayerESPObjects[player] and PlayerESPObjects[player].NameLabel or CreateNameLabel(player)
+        ClearPlayerESP(player)
+    end
+end
 
-                local size = Vector2.new(1000 / screenPos.Z, 1000 / screenPos.Z)
-                box.Size = size
-                box.Position = Vector2.new(screenPos.X - size.X / 2, screenPos.Y - size.Y / 2)
-                box.Color = PlayerESPSettings.Color
-                box.Transparency = 1 - PlayerESPSettings.Transparency
-                box.Visible = true
+-- Atualizar Inventory Text (simples: lista ferramentas do backpack e character)
+local function UpdateInventory(player)
+    local invGui = Inventories[player]
+    if not invGui then return end
+    local label = invGui:FindFirstChild("InventoryLabel")
+    if not label then return end
 
-                tracer.From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
-                tracer.To = Vector2.new(screenPos.X, screenPos.Y)
-                tracer.Color = PlayerESPSettings.Color
-                tracer.Transparency = 1 - PlayerESPSettings.Transparency
-                tracer.Visible = PlayerESPSettings.Tracers
-
-                nameLabel.Position = Vector2.new(screenPos.X, screenPos.Y - (size.Y / 2) - 15)
-                nameLabel.Color = PlayerESPSettings.Color
-                nameLabel.Visible = PlayerESPSettings.Names
-
-                PlayerESPObjects[player] = {
-                    Box = box,
-                    Tracer = tracer,
-                    NameLabel = nameLabel,
-                }
-            else
-                if PlayerESPObjects[player] then
-                    if PlayerESPObjects[player].Box then PlayerESPObjects[player].Box.Visible = false end
-                    if PlayerESPObjects[player].Tracer then PlayerESPObjects[player].Tracer.Visible = false end
-                    if PlayerESPObjects[player].NameLabel then PlayerESPObjects[player].NameLabel.Visible = false end
-                end
-            end
+    local items = {}
+    local backpack = player:FindFirstChildOfClass("Backpack")
+    local char = player.Character
+    if backpack then
+        for _, tool in pairs(backpack:GetChildren()) do
+            if tool:IsA("Tool") then table.insert(items, tool.Name) end
         end
     end
+    if char then
+        for _, tool in pairs(char:GetChildren()) do
+            if tool:IsA("Tool") then table.insert(items, tool.Name) end
+        end
+    end
+
+    if #items == 0 then
+        label.Text = "Inventory: Empty"
+    else
+        label.Text = "Inventory: "..table.concat(items, ", ")
+    end
 end
 
--- Rayfield Controls for Player ESP Section
+-- Criar aba ESP
+local ESPTab = Window:CreateTab("ESP", 6023426915)
 
-PlayerESPSection:CreateToggle({
-    Name = "Enable Player ESP",
+-- Section toggles
+local GeneralSection = ESPTab:CreateSection("Configurações Gerais")
+
+-- Toggle ESP geral
+ESPTab:CreateToggle({
+    Name = "Enable ESP",
     CurrentValue = false,
-    Flag = "PlayerESPEnabled",
+    Flag = "ToggleESP",
     Callback = function(value)
         ESPEnabled = value
-        if not value then ClearPlayerESP() end
+        if not ESPEnabled then
+            ClearAllESP()
+        end
     end
 })
 
-PlayerESPSection:CreateToggle({
-    Name = "Show Boxes",
-    CurrentValue = true,
-    Flag = "PlayerESPBoxes",
-    Callback = function(value)
-        PlayerESPSettings.Boxes = value
-    end
-})
-
-PlayerESPSection:CreateToggle({
-    Name = "Show Names",
-    CurrentValue = true,
-    Flag = "PlayerESPNames",
-    Callback = function(value)
-        PlayerESPSettings.Names = value
-    end
-})
-
-PlayerESPSection:CreateToggle({
-    Name = "Show Health",
-    CurrentValue = true,
-    Flag = "PlayerESPHealth",
-    Callback = function(value)
-        PlayerESPSettings.Health = value
-    end
-})
-
-PlayerESPSection:CreateToggle({
-    Name = "Show Distance",
+-- Highlight toggle e configuração
+ESPTab:CreateToggle({
+    Name = "Highlights",
     CurrentValue = false,
-    Flag = "PlayerESPDistance",
+    Flag = "ToggleHighlights",
     Callback = function(value)
-        PlayerESPSettings.Distance = value
+        HighlightEnabled = value
+        if not ESPEnabled then return end
+        if not value then
+            for _, hl in pairs(Highlights) do
+                hl:Destroy()
+            end
+            Highlights = {}
+        end
     end
 })
 
-PlayerESPSection:CreateToggle({
-    Name = "Show Tracers",
-    CurrentValue = false,
-    Flag = "PlayerESPTracers",
-    Callback = function(value)
-        PlayerESPSettings.Tracers = value
-    end
-})
-
-PlayerESPSection:CreateSlider({
-    Name = "Max ESP Distance",
-    Range = {100, 5000},
-    Increment = 100,
-    CurrentValue = 1000,
-    Flag = "PlayerESPMaxDistance",
-    Callback = function(value)
-        PlayerESPSettings.MaxDistance = value
-    end
-})
-
-PlayerESPSection:CreateColorPicker({
-    Name = "ESP Color",
-    Default = PlayerESPSettings.Color,
-    Flag = "PlayerESPColor",
+ESPTab:CreateColorPicker({
+    Name = "Highlight Color",
+    Default = HighlightColor,
+    Flag = "HighlightColor",
     Callback = function(color)
-        PlayerESPSettings.Color = color
+        HighlightColor = color
     end
 })
 
-PlayerESPSection:CreateSlider({
-    Name = "ESP Transparency",
+ESPTab:CreateSlider({
+    Name = "Highlight Transparency",
     Range = {0, 1},
     Increment = 0.05,
-    CurrentValue = PlayerESPSettings.Transparency,
-    Flag = "PlayerESPTransparency",
+    CurrentValue = HighlightTransparency,
+    Flag = "HighlightTransparency",
     Callback = function(value)
-        PlayerESPSettings.Transparency = value
+        HighlightTransparency = value
     end
 })
 
-PlayerESPSection:CreateButton({
-    Name = "Clear Player ESP",
-    Callback = function()
-        ClearPlayerESP()
+-- Box ESP
+ESPTab:CreateToggle({
+    Name = "Box ESP",
+    CurrentValue = false,
+    Flag = "ToggleBox",
+    Callback = function(value)
+        BoxEnabled = value
+        if not BoxEnabled then
+            for _, box in pairs(Boxes) do
+                box:Destroy()
+            end
+            Boxes = {}
+        end
     end
 })
 
--- You can add similar sections and controls for ItemESPSection, SoundESPSection, VisionESPSection following the same model.
+ESPTab:CreateColorPicker({
+    Name = "Box Color",
+    Default = BoxColor,
+    Flag = "BoxColor",
+    Callback = function(color)
+        BoxColor = color
+    end
+})
 
--- Update loop for ESP (basic example)
+-- Tracer ESP
+ESPTab:CreateToggle({
+    Name = "Tracer ESP",
+    CurrentValue = false,
+    Flag = "ToggleTracer",
+    Callback = function(value)
+        TracerEnabled = value
+        if not TracerEnabled then
+            for _, tracer in pairs(Tracers) do
+                tracer:Destroy()
+            end
+            Tracers = {}
+        end
+    end
+})
+
+ESPTab:CreateColorPicker({
+    Name = "Tracer Color",
+    Default = TracerColor,
+    Flag = "TracerColor",
+    Callback = function(color)
+        TracerColor = color
+         end
+})
+
+-- Distance ESP toggle e cor
+ESPTab:CreateToggle({
+    Name = "Show Distance",
+    CurrentValue = false,
+    Flag = "ToggleDistance",
+    Callback = function(value)
+        DistanceEnabled = value
+        if not DistanceEnabled then
+            for _, dist in pairs(Distances) do
+                dist:Destroy()
+            end
+            Distances = {}
+        end
+    end
+})
+
+ESPTab:CreateColorPicker({
+    Name = "Distance Color",
+    Default = DistanceColor,
+    Flag = "DistanceColor",
+    Callback = function(color)
+        DistanceColor = color
+    end
+})
+
+-- HealthBar ESP toggle e cor
+ESPTab:CreateToggle({
+    Name = "HealthBar",
+    CurrentValue = false,
+    Flag = "ToggleHealthBar",
+    Callback = function(value)
+        HealthBarEnabled = value
+        if not HealthBarEnabled then
+            for _, hb in pairs(HealthBars) do
+                hb.Gui:Destroy()
+            end
+            HealthBars = {}
+        end
+    end
+})
+
+ESPTab:CreateColorPicker({
+    Name = "HealthBar Color",
+    Default = HealthBarColor,
+    Flag = "HealthBarColor",
+    Callback = function(color)
+        HealthBarColor = color
+    end
+})
+
+-- Name ESP toggle e cor
+ESPTab:CreateToggle({
+    Name = "Show Name",
+    CurrentValue = false,
+    Flag = "ToggleName",
+    Callback = function(value)
+        NameEnabled = value
+        if not NameEnabled then
+            for _, nameGui in pairs(Names) do
+                nameGui:Destroy()
+            end
+            Names = {}
+        end
+    end
+})
+
+ESPTab:CreateColorPicker({
+    Name = "Name Color",
+    Default = NameColor,
+    Flag = "NameColor",
+    Callback = function(color)
+        NameColor = color
+    end
+})
+
+-- Inventory ESP toggle e cor
+ESPTab:CreateToggle({
+    Name = "Show Inventory",
+    CurrentValue = false,
+    Flag = "ToggleInventory",
+    Callback = function(value)
+        InventoryEnabled = value
+        if not InventoryEnabled then
+            for _, invGui in pairs(Inventories) do
+                invGui:Destroy()
+            end
+            Inventories = {}
+        end
+    end
+})
+
+ESPTab:CreateColorPicker({
+    Name = "Inventory Color",
+    Default = InventoryColor,
+    Flag = "InventoryColor",
+    Callback = function(color)
+        InventoryColor = color
+    end
+})
+
+-- Função principal de update ESP por frame
 RunService.RenderStepped:Connect(function()
-    pcall(function()
-        if ESPEnabled then
-            UpdatePlayerESP()
-            -- UpdateItemESP()
-            -- UpdateSoundESP()
-            -- UpdateVisionESP()
+    if not ESPEnabled then return end
+
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") and player.Character:FindFirstChildOfClass("Humanoid") then
+            local char = player.Character
+            local hrp = char.HumanoidRootPart
+            local humanoid = char:FindFirstChildOfClass("Humanoid")
+            local rootPos, onScreen = Camera:WorldToViewportPoint(hrp.Position)
+
+            -- Highlight
+            if HighlightEnabled then
+                if not Highlights[player] then
+                    local hl = Instance.new("Highlight")
+                    hl.Name = "ESPHighlight"
+                    hl.Adornee = char
+                    hl.FillColor = HighlightColor
+                    hl.OutlineTransparency = HighlightTransparency
+                    hl.Parent = game:GetService("CoreGui")
+                    Highlights[player] = hl
+                else
+                    Highlights[player].FillColor = HighlightColor
+                    Highlights[player].OutlineTransparency = HighlightTransparency
+                    Highlights[player].Enabled = onScreen
+                end
+            elseif Highlights[player] then
+                Highlights[player]:Destroy()
+                Highlights[player] = nil
+            end
+
+            -- Box ESP
+            if BoxEnabled then
+                if not Boxes[player] then
+                    Boxes[player] = CreateBoxGui(hrp)
+                end
+                local boxGui = Boxes[player]
+                boxGui.Frame.BackgroundColor3 = BoxColor
+                boxGui.Adornee = hrp
+                boxGui.Enabled = onScreen
+            elseif Boxes[player] then
+                Boxes[player]:Destroy()
+                Boxes[player] = nil
+            end
+
+            -- Tracer ESP
+            if TracerEnabled then
+                if not Tracers[player] then
+                    local line = CreateTracer()
+                    Tracers[player] = line
+                end
+                local tracer = Tracers[player]
+                tracer.BackgroundColor3 = TracerColor
+                tracer.Visible = onScreen
+
+                if onScreen then
+                    local screenPos = Vector2.new(rootPos.X, rootPos.Y)
+                    local bottomCenter = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y)
+                    local distance = (screenPos - bottomCenter).Magnitude
+                    tracer.Size = UDim2.new(0, 2, 0, distance)
+                    tracer.Position = UDim2.new(0, bottomCenter.X, 0, bottomCenter.Y)
+                    local direction = (screenPos - bottomCenter).Unit
+                    local angle = math.deg(math.atan2(direction.Y, direction.X)) - 90
+                    tracer.Rotation = angle
+                end
+            elseif Tracers[player] then
+                Tracers[player]:Destroy()
+                Tracers[player] = nil
+            end
+
+            -- Distance ESP
+            if DistanceEnabled then
+                if not Distances[player] then
+                    local distGui = CreateBillboard(hrp, "DistanceESP", UDim2.new(0, 100, 0, 20), Vector3.new(0, 5, 0))
+                    local distLabel = CreateTextLabel(distGui, "", DistanceColor, 14)
+                    distLabel.Name = "DistanceLabel"
+                    Distances[player] = distGui
+                end
+                local distGui = Distances[player]
+                local distLabel = distGui:FindFirstChild("DistanceLabel")
+                local distText = math.floor((LocalPlayer.Character.HumanoidRootPart.Position - hrp.Position).Magnitude)
+                distLabel.Text = distText .. "m"
+                distLabel.TextColor3 = DistanceColor
+                distGui.Enabled = onScreen
+            elseif Distances[player] then
+                Distances[player]:Destroy()
+                Distances[player] = nil
+            end
+
+            -- HealthBar ESP
+            if HealthBarEnabled then
+                if not HealthBars[player] then
+                    local gui, bar = CreateHealthBarGui(hrp)
+                    HealthBars[player] = {Gui = gui, Bar = bar}
+                end
+                local hb = HealthBars[player]
+                local healthPercent = humanoid.Health / humanoid.MaxHealth
+                hb.Bar.Size = UDim2.new(healthPercent, 0, 1, 0)
+                hb.Bar.BackgroundColor3 = HealthBarColor
+                hb.Gui.Enabled = onScreen
+            elseif HealthBars[player] then
+                HealthBars[player].Gui:Destroy()
+                HealthBars[player] = nil
+            end
+
+            -- Name ESP
+            if NameEnabled then
+                if not Names[player] then
+                    local nameGui = CreateBillboard(hrp, "NameESP", UDim2.new(0, 120, 0, 20), Vector3.new(0, 4, 0))
+                    local nameLabel = CreateTextLabel(nameGui, player.Name, NameColor, 16)
+                    nameLabel.Name = "NameLabel"
+                    Names[player] = nameGui
+                end
+                local nameGui = Names[player]
+                local nameLabel = nameGui:FindFirstChild("NameLabel")
+                nameLabel.Text = player.Name
+                nameLabel.TextColor3 = NameColor
+                nameGui.Enabled = onScreen
+            elseif Names[player] then
+                Names[player]:Destroy()
+                Names[player] = nil
+            end
+
+            -- Inventory ESP
+            if InventoryEnabled then
+                if not Inventories[player] then
+                    local invGui = CreateBillboard(hrp, "InventoryESP", UDim2.new(0, 200, 0, 40), Vector3.new(0, 6, 0))
+                    local invLabel = CreateTextLabel(invGui, "", InventoryColor, 14)
+                    invLabel.Name = "InventoryLabel"
+                    Inventories[player] = invGui
+                end
+                UpdateInventory(player)
+                local invGui = Inventories[player]
+                local invLabel = invGui:FindFirstChild("InventoryLabel")
+                invLabel.TextColor3 = InventoryColor
+                invGui.Enabled = onScreen
+            elseif Inventories[player] then
+                Inventories[player]:Destroy()
+                Inventories[player] = nil
+            end
+
         else
-            ClearPlayerESP()
-            -- ClearItemESP()
-            -- ClearSoundESP()
-            -- ClearVisionESP()
+            ClearPlayerESP(player)
+        end
+    end
+end)
+
+-- Limpar ESP ao sair do jogo ou reiniciar personagem
+Players.PlayerRemoving:Connect(function(player)
+    ClearPlayerESP(player)
+end)
+
+Players.PlayerAdded:Connect(function(player)
+    player.CharacterAdded:Connect(function()
+        wait(1)
+        if ESPEnabled then
+            -- ESP vai ser criado no RenderStepped automaticamente
         end
     end)
 end)
